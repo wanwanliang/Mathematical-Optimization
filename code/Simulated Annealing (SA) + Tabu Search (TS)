@@ -1,0 +1,334 @@
+setwd("C:/Users/wliang5/Desktop/Optimi_test/smAOI")
+hzd3=readOGR(".","RankBigger")
+inf=raster(infected_files)
+
+#### Define Fitness function ####
+
+# trt is spatialpolygons covering the treatment area, inf is the infected raster 
+SAfit= function(trt,inf){ 
+  
+  trt=trt
+  trt=gUnionCascaded(trt)
+  toRa=rasterize(trt,inf,field=1,background=0)
+  
+  trt=list(as.matrix(toRa))
+  df=data.frame(matrix(0,nrow=20,ncol=1))
+  
+  for (j in 1:20){
+    
+    random_seed= j*1000+50
+    
+    
+    data <- pops_model(random_seed = random_seed, 
+                       use_lethal_temperature = use_lethal_temperature, 
+                       lethal_temperature = lethal_temperature, 
+                       lethal_temperature_month = lethal_temperature_month,
+                       
+                       infected = infected_speci[[1]],
+                       susceptible = susceptible_speci[[1]],
+                       total_plants = total_pl[[1]],
+                       mortality_on = mortality_on,
+                       mortality_tracker = infected_speci[[1]]*0,
+                       mortality = infected_speci[[1]]*0,
+                       treatment_maps = trt,
+                       
+                       treatment_dates = c("2019-03-01"),
+                       pesticide_duration=c(0),
+                       resistant = infected_speci[[1]]*0,
+                       weather = weather,
+                       temperature = temperature,
+                       weather_coefficient = wc,
+                       ew_res = ew_res, ns_res = ns_res, num_rows = num_rows, num_cols = num_cols,
+                       time_step = time_step, reproductive_rate = reproductive_rate[[2]],
+                       mortality_rate = mortality_rate, mortality_time_lag = mortality_time_lag,
+                       season_month_start = season_month_start, season_month_end = season_month_end,
+                       start_date = start_time, end_date = end_time,
+                       treatment_method = "all infected", 
+                       
+                       natural_kernel_type = natural_kernel_type[[1]], anthropogenic_kernel_type = anthropogenic_kernel_type[[1]], 
+                       use_anthropogenic_kernel = use_anthropogenic_kernel, percent_natural_dispersal = percent_natural_dispersal[[1]],
+                       natural_distance_scale = natural_distance_scale[[2]], anthropogenic_distance_scale = anthropogenic_distance_scale[[1]], 
+                       natural_dir = natural_dir[[1]], natural_kappa = natural_kappa[[1]],
+                       anthropogenic_dir = anthropogenic_dir[[1]], anthropogenic_kappa = anthropogenic_kappa[[1]],output_frequency = "year")
+    
+    area=data$area_infected
+    area=area/10000
+    
+    df[j,1]=area
+  }
+  
+  mean=mean(df[1:20,1])
+  return(mean)
+}
+
+
+# test code
+SAfit(hzd3, inf)
+
+######## SA function for single run  ########
+## initial_selections and more_selections are initial selected locations and more new locations can be considered, respectively. 
+SA= function(initial_selections,more_selections,number_iteration=100){
+  
+  # set cooling temperatures, values can be changed, 
+  # larger values give more flexbility and can lead to better results with enough iterations
+  # important parameters
+  tl=seq(4,0,by=-0.4) # cooling temperatures
+  
+  nl=length(tl)
+  
+  
+  f1=SAfit(initial_selections,inf)
+  ply50=initial_selections
+  ply20=more_selections
+  best=initial_selections
+  
+  ply50$ID=1:length(ply50)
+  ply20$ID=(1+length(ply50)):(length(ply50)+length(ply20))
+  ply20$remove=0
+  ply50$remove=0
+  
+  
+  nLocation=length(ply50)
+  newLocation=length(ply20)
+  
+  nl1=round(nLocation*0.5)
+  nl2=round(nLocation*0.75)-round(nLocation*0.5)
+  nl3=nLocation-nl1-nl2
+  
+  ne1=round(newLocation*0.5)
+  ne2=round(newLocation*0.75)-round(newLocation*0.5)
+  ne3=newLocation-ne1-ne2
+  
+  
+  # set weights for picking up old location to be replaced with new location, 
+  # important parameters
+  p=c(1,4,9)
+  wt20=c(rep(p[3],ne1),rep(p[2],ne2),rep(p[1],ne3))
+  wt50=c(rep(p[1],nl1),rep(p[2],nl2),rep(p[3],nl3))
+  
+  df=data.frame(matrix(0,ncol=1,nrow=length(tl)*number_iteration))
+  Ns=0
+  
+  for (r in 1:length(tl)){
+    
+    t=tl[r]
+    
+    for (i in 1:number_iteration){
+      
+      if (length(ply20)==0){break}
+      
+      id50=sample(1:length(wt50),1,prob=wt50)
+      s50=ply50[id50,]
+      
+      id20=sample(1:length(ply20),1,prob=wt20)
+      s20=ply20[id20,]
+      
+      
+      trt=rbind(ply50[-id50,],s20)
+      
+      
+      f2=SAfit(trt,inf)
+      dif=f2-f1
+      
+      if (dif>60){
+        
+        ply20$remove[id20]=ply20$remove[id20]+1
+        
+        wt20=wt20[ply20$remove<10]
+        ply20=ply20[ply20$remove<10,]
+      }
+      
+      if (f2<=f1){
+        
+        ply50=rbind(ply50[-id50,],s20)
+        ply20=rbind(s50,ply20[-id20,])
+        
+        f1=f2
+        best=ply50
+        
+      }
+      if (dif<=60 & dif>0) {
+        
+        prop=exp(1)^(-dif/t)
+        
+        if (prop<1){
+          n=floor(prop*100)
+          
+          if (n>0){
+            n2=100-n
+            chid=sample(1:2,1,prob = c(n,n2))
+            
+            if (chid==1){
+              ply50=rbind(ply50[-id50,],s20)
+              ply20=rbind(s50,ply20[-id20,])
+              #contr=res
+              f1=f2
+            }
+          }
+          
+          
+        }
+        
+        
+      }
+      
+      Ns=Ns+1
+      df[Ns,1]=f1
+      
+      print(f1)
+    }
+    
+  }
+  
+  
+  ftb=SAfit(best,inf)
+  results=list(ftb,best)
+  return (results)
+}
+SArun=SA(ply50,ply20,200)  
+
+
+###### SA functions for parallel using foreach #######
+
+SAparFun= function(k){
+   
+  nLocation=length(ply50)
+  newLocation=length(ply20)
+  
+  nl1=round(nLocation*0.5)
+  nl2=round(nLocation*0.75)-round(nLocation*0.5)
+  nl3=nLocation-nl1-nl2
+  
+  ne1=round(newLocation*0.5)
+  ne2=round(newLocation*0.75)-round(newLocation*0.5)
+  ne3=newLocation-ne1-ne2
+  
+  p=c(1,4,9)
+  wt20=c(rep(p[3],ne1),rep(p[2],ne2),rep(p[1],ne3))
+  wt50=c(rep(p[1],nl1),rep(p[2],nl2),rep(p[3],nl3))
+  
+  
+  tl=seq(4,0,by=-0.4)
+  nl=length(tl)
+  number_iteration= 2000
+  
+  f1=SAfit(initial_selections,inf)
+  ply50=initial_selections
+  ply20=more_selections
+  best=initial_selections
+  
+  ply50$ID=1:length(ply50)
+  ply20$ID=(1+length(ply50)):(length(ply50)+length(ply20))
+  ply20$remove=0
+  ply50$remove=0
+  
+  df=data.frame(matrix(0,ncol=1,nrow=length(tl)*number_iteration))
+  Ns=0
+  
+  for (r in 1:length(tl)){
+    
+    t=tl[r]
+    
+    for (i in 1:number_iteration){
+      
+      if (length(ply20)==0){break}
+      
+      id50=sample(1:length(wt50),1,prob=wt50)
+      s50=ply50[id50,]
+      
+      id20=sample(1:length(ply20),1,prob=wt20)
+      s20=ply20[id20,]
+      
+      
+      trt=rbind(ply50[-id50,],s20)
+      
+      
+      f2=SAfit(trt,inf)
+      dif=f2-f1
+      
+      if (dif>60){
+        
+        #ply20=ply20[-id20,]
+        #wt20=wt20[-id20]
+        ply20$remove[id20]=ply20$remove[id20]+1
+        #wt20[id20]=wt20[id20]/2
+        
+        wt20=wt20[ply20$remove<10]
+        ply20=ply20[ply20$remove<10,]
+      }
+      
+      if (f2<=f1){
+        
+        ply50=rbind(ply50[-id50,],s20)
+        ply20=rbind(s50,ply20[-id20,])
+        
+        f1=f2
+        best=ply50
+        
+      }
+      if (dif<=60 & dif>0) {
+        
+        prop=exp(1)^(-dif/t)
+        
+        if (prop<1){
+          n=floor(prop*100)
+          
+          if (n>0){
+            n2=100-n
+            chid=sample(1:2,1,prob = c(n,n2))
+            
+            if (chid==1){
+              ply50=rbind(ply50[-id50,],s20)
+              ply20=rbind(s50,ply20[-id20,])
+              #contr=res
+              f1=f2
+            }
+          }
+          
+        }
+        
+      }
+
+    }
+    
+  }
+  
+  bestft=SAfit(best,inf)
+  return(bestft)
+  
+  #return(best$ID)
+  #return(best)
+}
+
+
+## Run SA in parallel ##
+library(foreach)
+library(parallel)
+library(doParallel)
+
+t1=proc.time()
+cl=makeCluster(30)
+registerDoParallel(cl)
+
+result=foreach(k=1:30,.combine = rbind,.errorhandling = "pass",.export = c("SAparFun","ply20","best","ply50","SAfit","hzd3","inf","use_lethal_temperature","lethal_temperature","lethal_temperature_month",
+                                                   "infected_speci","susceptible_speci","total_pl","mortality_on","weather","temperature","wc",
+                                                   "ew_res","ns_res","num_rows","num_cols","time_step","reproductive_rate","mortality_rate","mortality_time_lag",
+                                                   "season_month_start", "season_month_end","start_time","end_time","natural_kernel_type","anthropogenic_kernel_type",
+                                                   "use_anthropogenic_kernel", "percent_natural_dispersal","natural_distance_scale", "anthropogenic_distance_scale",
+                                                   "natural_dir", "natural_kappa","anthropogenic_dir", "anthropogenic_kappa"),.packages = c("rgdal","raster","PoPS","rgeos"))%dopar%
+  
+  {
+    ftva=SAparFun(k)
+    #if (ftva[[1]]<1490){
+    # re=ftva[[2]]
+    #return(re)
+    #} else {return(hzd3[526,])}
+    #return(ftva[[1]])
+    return(ftva)
+  }
+
+stopCluster(cl)
+proc.time()-t1
+
+dim(result)
+summary(result)
