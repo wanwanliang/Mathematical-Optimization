@@ -10,4 +10,4 @@
 <br/><br/><br/>
 
 
-![Combination](/files/combination.jpeg)
+![Combination](https://github.com/wanwanliang/Mathematical-Optimization/blob/master/files/combination.jpg)
